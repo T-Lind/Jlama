@@ -20,7 +20,7 @@ Model Support:
   * Qwen2 Models
   * IBM Granite Models
   * GPT-2 Models
-  * BERT Models
+  * BERT Models (including LEAF embedding model)
   * BPE Tokenizers
   * WordPiece Tokenizers
 
@@ -259,6 +259,75 @@ You can simplify promptSupport using:
     System.out.println(r.responseText);
  }
 ```
+
+### 🔍 Semantic Search & Embeddings
+
+Jlama supports embedding models for semantic search, information retrieval, and code understanding. The [LEAF model](https://huggingface.co/MongoDB/mdbr-leaf-ir) is a compact, efficient embedding model optimized for information retrieval tasks - perfect for semantic code search, RAG applications, and understanding codebases semantically.
+
+**Use Cases:**
+- **Semantic Code Search**: Find code by meaning, not just keywords (e.g., "find all database connection methods")
+- **Code Understanding**: Understand relationships between classes, methods, and concepts in large codebases
+- **RAG Applications**: Build retrieval-augmented generation systems for code documentation and knowledge bases
+- **Information Retrieval**: Semantic search across documentation, code comments, and technical content
+
+```java
+import com.github.tjake.jlama.math.VectorMath;
+import com.github.tjake.jlama.model.AbstractModel;
+import com.github.tjake.jlama.model.ModelSupport;
+import com.github.tjake.jlama.model.functions.Generator;
+import com.github.tjake.jlama.safetensors.DType;
+import com.github.tjake.jlama.safetensors.SafeTensorSupport;
+import java.io.File;
+import java.io.IOException;
+
+public void semanticCodeSearch() throws IOException {
+    String modelName = "MongoDB/mdbr-leaf-ir";
+    String workingDirectory = "./models";
+    
+    // Download and load the LEAF embedding model
+    File localModelPath = SafeTensorSupport.maybeDownloadModel(workingDirectory, modelName);
+    AbstractModel embeddingModel = ModelSupport.loadEmbeddingModel(localModelPath, DType.F32, DType.F32);
+    
+    // Embed code snippets or documentation
+    String query = "database connection initialization";
+    String[] codeSnippets = {
+        "public class DatabaseConnection { private Connection conn; ... }",
+        "public void connectToDatabase(String url) { ... }",
+        "public class UserService { public void authenticate() { ... } }",
+        "Connection conn = DriverManager.getConnection(url, user, pass);"
+    };
+    
+    // Generate embeddings
+    float[] queryEmbedding = embeddingModel.embed(query, Generator.PoolingType.AVG);
+    
+    // Find most similar code snippet
+    float maxSimilarity = -1.0f;
+    String bestMatch = "";
+    for (String snippet : codeSnippets) {
+        float[] snippetEmbedding = embeddingModel.embed(snippet, Generator.PoolingType.AVG);
+        float similarity = VectorMath.cosineSimilarity(queryEmbedding, snippetEmbedding);
+        if (similarity > maxSimilarity) {
+            maxSimilarity = similarity;
+            bestMatch = snippet;
+        }
+    }
+    
+    System.out.println("Best match: " + bestMatch + " (similarity: " + maxSimilarity + ")");
+}
+```
+
+**Example: Building a Semantic Code Index**
+
+For tools like [Brokk AI](https://brokk.ai) that need to understand code semantically, you can use LEAF embeddings to:
+
+1. **Index codebase**: Generate embeddings for classes, methods, and documentation
+2. **Semantic search**: Find relevant code by meaning, not just text matching
+3. **Context retrieval**: Retrieve semantically similar code for LLM context
+4. **Code understanding**: Understand relationships and patterns across large codebases
+
+The LEAF model's compact size (23M parameters, 384 dimensions) makes it ideal for production use in IDEs and code analysis tools where low latency and memory efficiency are critical.
+
+See `jlama-core/src/main/java/com/github/tjake/jlama/examples/LeafModelExample.java` for a complete example.
 
 ## Devloping Jlama
 
