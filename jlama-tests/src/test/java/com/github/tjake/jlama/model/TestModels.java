@@ -385,6 +385,101 @@ public class TestModels {
         logger.info("took {} seconds, {}ms per emb", elapsed / 1000f, elapsed / 1000f);
     }
 
+    @Test
+    public void LeafModelRun() throws Exception {
+        String modelName = "MongoDB/mdbr-leaf-ir";
+        String workingDirectory = "./models";
+
+        // Download the LEAF model or use existing if already downloaded
+        File localModelPath = SafeTensorSupport.maybeDownloadModel(workingDirectory, modelName);
+        logger.info("Using LEAF model from: {}", localModelPath);
+
+        // Load as embedding model
+        AbstractModel model = ModelSupport.loadEmbeddingModel(localModelPath, DType.F32, DType.F32);
+
+        // Verify model configuration - LEAF should have 384 dimensions
+        Assert.assertEquals("LEAF model should have 384 embedding dimensions", 384, model.getConfig().embeddingLength);
+
+        // Test embedding generation with AVG pooling (LEAF doesn't have a pooler layer)
+        String query1 = "What is artificial intelligence?";
+        float[] embedding1 = model.embed(query1, Generator.PoolingType.AVG);
+        Assert.assertEquals("Embedding should have 384 dimensions", 384, embedding1.length);
+        logger.info("Generated embedding for '{}' with AVG pooling, dimension: {}", query1, embedding1.length);
+
+        // Verify embedding values are finite and not all zeros
+        boolean hasNonZero = false;
+        boolean allFinite = true;
+        for (float v : embedding1) {
+            if (v != 0.0f) hasNonZero = true;
+            if (!Float.isFinite(v)) allFinite = false;
+        }
+        Assert.assertTrue("Embedding should have non-zero values", hasNonZero);
+        Assert.assertTrue("All embedding values should be finite", allFinite);
+
+        // Test similarity between related texts
+        String query2 = "Define artificial intelligence";
+        String query3 = "What is the weather today?";
+        
+        // LEAF model uses AVG pooling (no pooler layer)
+        Generator.PoolingType poolingType = Generator.PoolingType.AVG;
+        float[] embedding2 = model.embed(query2, poolingType);
+        float[] embedding3 = model.embed(query3, poolingType);
+
+        float similarity12 = VectorMath.cosineSimilarity(embedding1, embedding2);
+        float similarity13 = VectorMath.cosineSimilarity(embedding1, embedding3);
+
+        logger.info("Similarity between '{}' and '{}': {:.4f}", query1, query2, String.format("%.4f", similarity12));
+        logger.info("Similarity between '{}' and '{}': {:.4f}", query1, query3, String.format("%.4f", similarity13));
+
+        // Related queries should have higher similarity than unrelated ones
+        Assert.assertTrue(
+            String.format("Related queries should have higher similarity (%.4f > %.4f)", similarity12, similarity13),
+            similarity12 > similarity13
+        );
+
+        // Test with information retrieval examples
+        String base = "MongoDB is a NoSQL database";
+        String[] examples = new String[] {
+            "MongoDB stores data in documents",
+            "PostgreSQL is a relational database",
+            "The cat sat on the mat",
+            "NoSQL databases are non-relational",
+            "MongoDB uses BSON format"
+        };
+
+        float[] baseEmbedding = model.embed(base, poolingType);
+        float maxSimilarity = 0.0f;
+        String bestMatch = "";
+        int bestIndex = -1;
+
+        for (int i = 0; i < examples.length; i++) {
+            float[] exampleEmbedding = model.embed(examples[i], poolingType);
+            float similarity = VectorMath.cosineSimilarity(baseEmbedding, exampleEmbedding);
+            logger.info("Similarity between '{}' and '{}': {}", base, examples[i], String.format("%.4f", similarity));
+            if (similarity > maxSimilarity) {
+                maxSimilarity = similarity;
+                bestMatch = examples[i];
+                bestIndex = i;
+            }
+        }
+
+        logger.info("Best match for '{}' is '{}' with similarity {}", base, bestMatch, String.format("%.4f", maxSimilarity));
+
+        // The best match should be one of the MongoDB-related examples (indices 0, 3, or 4)
+        Assert.assertTrue(
+            "Best match should be MongoDB-related",
+            bestIndex == 0 || bestIndex == 3 || bestIndex == 4
+        );
+
+        // Performance test
+        long start = System.currentTimeMillis();
+        int iterations = 100;
+        VectorMath.pfor(0, iterations, i -> model.embed(query1, poolingType));
+        long elapsed = System.currentTimeMillis() - start;
+        double avgTime = (double) elapsed / iterations;
+        logger.info("Performance: {} embeddings in {}ms, avg {}ms per embedding", iterations, elapsed, String.format("%.2f", avgTime));
+    }
+
     private BiConsumer<String, Float> makeOutHandler() {
         PrintWriter out;
         BiConsumer<String, Float> outCallback;
